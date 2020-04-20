@@ -2,20 +2,6 @@
     (:require [clojure.string :as str])
     (:gen-class)
 )
-
-;; Testing
-
-(defn check_columns_amount [table] 
-  (def ideal (count (first table)))
-  ((fn [table] 
-    (if (empty? table)
-      true
-      (if (= ideal (count (first table)))
-        (recur (rest table))
-        false))
-  ) table)
-)
-
 ;; Helpers
 
 ;; Finds in every column the length of the longest element
