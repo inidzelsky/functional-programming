@@ -189,23 +189,42 @@
 
 ;; Getting "where" conditions
 (defn get_where [query]
-  (try
-    (def where_string 
-      (if (str/includes? query "where") 
-        (subs query (+ (.indexOf query "where") 5) (count query))
-        ""))
+  (defn create_map [condition]
+    (hash-map
+      :column (if (str/includes? condition "<=") 
+                (str/trim (subs condition 0 (.indexOf condition "<=")))
+                (str/trim (subs condition 0 (.indexOf condition "<>")))) 
+      :operation (if (str/includes? condition "<=") "<=" "<>") 
+      :value (if (str/includes? condition "<=")
+                (str/trim (subs condition (+ (.indexOf condition "<=") 2) (count condition)))
+                (str/trim (subs condition (+ (.indexOf condition "<>") 2) (count condition)))))
+  )
 
-    (if-not (empty? where_string)
-      (hash-map
-        :column (if (str/includes? where_string "<=") 
-                  (str/trim (subs where_string 0 (.indexOf where_string "<=")))
-                  (str/trim (subs where_string 0 (.indexOf where_string "<>")))) 
-        :operation (if (str/includes? where_string "<=") "<=" "<>") 
-        :value (if (str/includes? where_string "<=")
-                  (str/trim (subs where_string (+ (.indexOf where_string "<=") 2) (- (count where_string) 1)))
-                  (str/trim (subs where_string (+ (.indexOf where_string "<>") 2) (- (count where_string) 1)))))
-      {})
-  (catch Exception e (throw (AssertionError. "Invalid input after \"where\" context"))))
+  (defn handle_logic [where_string]
+    (if (= where_string "")
+      []
+      (cond
+        (str/includes? where_string "or") 
+          (flatten [(handle_logic (str/trim (subs where_string 0 (.lastIndexOf where_string "or")))) 
+            (handle_logic (str/trim (subs where_string (+ (.lastIndexOf where_string "or") 2) (count where_string))))
+             "or"])
+      
+        (str/includes? where_string "and") 
+          (flatten [(handle_logic (str/trim (subs where_string 0 (.lastIndexOf where_string "and")))) 
+            (handle_logic (str/trim (subs where_string (+ (.lastIndexOf where_string "and") 3) (count where_string))))
+             "and"])
+             
+        :else (create_map (str/trim where_string))))
+  )
+
+  (try 
+    (vec 
+      (handle_logic 
+        (if (str/includes? query "where") 
+        (subs query (+ (.indexOf query "where") 6) (.indexOf query ";")) 
+        "")))
+    (catch Exception e (throw (AssertionError. "Invalid where conditions")))
+  )
 )
 
 ;; Getting column names from the query
@@ -267,6 +286,8 @@
 )
 
 (defn -main []
-  (cli)
+  ;;(cli)
+  
+  (println (get_where "select * from mp-posts where id <> 5 and ip <= 8000 or mp_id <= 5 and post_name <> \"Golovko\""))
 )
 
