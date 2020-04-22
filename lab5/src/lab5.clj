@@ -4,6 +4,35 @@
 )
 ;; Helpers
 
+;; Checks whether according elements of 2 vectors are equal 
+(defn rows_equal? [row1 row2] 
+  (if (and (empty? row1) (empty? row2))
+    true
+    (if (= (first row1) (first row2))
+      (recur (rest row1) (rest row2))
+      false))
+)
+
+;; Unites 2 tables
+(defn unite [table1 table2] 
+  (if (empty? table1)
+    (vec table2)
+    (if (> (.indexOf (map (fn [row] (rows_equal? (first table1) row)) table2) true) -1)
+      (unite (rest table1) table2)
+      (unite (rest table1) (conj table2 (first table1)))))
+)
+
+(defn intersect [table1 table2] 
+  (if (empty? table1)
+    `()
+    (vec (remove nil? (conj 
+      (seq (intersect (rest table1) table2))
+      (if (> (.indexOf (map (fn [row] (rows_equal? (first table1) row)) table2) true) -1)
+        (first table1)
+        nil)))))
+)
+
+
 ;; Finds in every column the length of the longest element
 (defn find_max_length [table]
   (defn compare_vectors [vec1 vec2]
@@ -287,7 +316,6 @@
 
 (defn -main []
   ;;(cli)
-  
-  (println (get_where "select * from mp-posts where id <> 5 and ip <= 8000 or mp_id <= 5 and post_name <> \"Golovko\""))
+  ;;(println (get_where "select * from mp-posts where id<>5 and ip<=8000 or mp_id<=5 and post_name<>\"Golovko\";"))
 )
 
