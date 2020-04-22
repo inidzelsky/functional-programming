@@ -2,7 +2,6 @@
     (:require [clojure.string :as str])
     (:gen-class)
 )
-;; Helpers
 
 ;; Checks whether according elements of 2 vectors are equal 
 (defn rows_equal? [row1 row2] 
@@ -10,8 +9,7 @@
     true
     (if (= (first row1) (first row2))
       (recur (rest row1) (rest row2))
-      false))
-)
+      false)))
 
 ;; Unites 2 tables
 (defn unite [table1 table2] 
@@ -19,9 +17,9 @@
     (vec table2)
     (if (> (.indexOf (map (fn [row] (rows_equal? (first table1) row)) table2) true) -1)
       (unite (rest table1) table2)
-      (unite (rest table1) (conj table2 (first table1)))))
-)
+      (unite (rest table1) (conj table2 (first table1))))))
 
+;; Intersects 2 tables
 (defn intersect [table1 table2] 
   (if (empty? table1)
     `()
@@ -29,9 +27,7 @@
       (seq (intersect (rest table1) table2))
       (if (> (.indexOf (map (fn [row] (rows_equal? (first table1) row)) table2) true) -1)
         (first table1)
-        nil)))))
-)
-
+        nil))))))
 
 ;; Finds in every column the length of the longest element
 (defn find_max_length [table]
@@ -40,25 +36,20 @@
       (seq vec2)
       (if (empty? vec2) 
         (seq vec1) 
-        (conj (compare_vectors (rest vec1) (rest vec2)) (if (> (first vec1) (first vec2)) (first vec1) (first vec2)))))
-  )
+        (conj (compare_vectors (rest vec1) (rest vec2)) (if (> (first vec1) (first vec2)) (first vec1) (first vec2))))))
 
   (defn run_rows_max [table result] 
     (if (empty? table)
       result
-      (recur (rest table) (compare_vectors result (map (fn [element] (count element)) (first table)))))
-  )
+      (recur (rest table) (compare_vectors result (map (fn [element] (count element)) (first table))))))
 
-  (vec (run_rows_max table []))
-)
+  (vec (run_rows_max table [])))
 
-(defn add_symbols [num symb] 
-  (if (> num 0)
-    (str symb (add_symbols (dec num) symb))
-    "")
-)
-
-;; Realisation
+;; Creates a string of len length of symb
+(defn add_symbols [len symb] 
+  (if (> len 0)
+    (str symb (add_symbols (dec len) symb))
+    ""))
 
 ;; Defines whether files vector includes table
 (defn read_file [table_name files_vec]
@@ -66,21 +57,18 @@
     false 
     (if (= (first files_vec) table_name) 
       true
-      (recur table_name (rest files_vec))))
-)
+      (recur table_name (rest files_vec)))))
 
 ;; Reads .txt files
 (defn read_txt [file_name]
   (defn split_handler [row]
     (if (> (count (str/split row #"\t")) 1)
       (str/split row #"\t")
-      (str/split row #"  "))
-  )
+      (str/split row #"  ")))
 
   (map 
     (fn [row] (split_handler row))
-    (str/split-lines (slurp file_name)))
-)
+    (str/split-lines (slurp file_name))))
 
 ;; Reads .csv files
 (defn read_csv [file_name] 
@@ -92,13 +80,11 @@
         (cond 
           (and (= (first chars) ",") (not quoted)) (recur (rest chars) quoted "" (conj res (if (empty? buf) "null" buf)))
           (= (first chars) "\"") (recur (rest chars) (not quoted) buf res)
-          :else (recur (rest chars) quoted (str buf (first chars)) res))))  
-  )
+          :else (recur (rest chars) quoted (str buf (first chars)) res)))))
 
   (map
     (fn [row] (split_handler (conj (str/split row #"") ",")))
-    (str/split-lines (slurp file_name)))
-)
+    (str/split-lines (slurp file_name))))
 
 ;; Reads .tsv files
 (defn read_tsv [file_name] 
@@ -109,14 +95,13 @@
         res
         (if (= (first chars) "\t") 
           (recur (rest chars) "" (conj res (if (empty? buf) "null" buf)))
-          (recur (rest chars) (str buf (first chars)) res))))  
-  )
+          (recur (rest chars) (str buf (first chars)) res)))))
 
   (map
     (fn [row] (split_handler (conj (str/split row #"") "\t")))
-    (str/split-lines (slurp file_name)))
-)
+    (str/split-lines (slurp file_name))))
 
+;; Filter rows by uniqueness criteria
 (defn apply_distinct
   ([table distinct] (if distinct (apply_distinct table [] []) table))
   ([table hash result] 
@@ -124,9 +109,9 @@
       (vec result)
       (if (> (.indexOf hash (first (first table))) -1)
         (recur (rest table) hash result)
-        (recur (rest table) (conj hash (first (first table))) (conj result (first table))))))
-)
+        (recur (rest table) (conj hash (first (first table))) (conj result (first table)))))))
 
+;; Filter rows by given conditions
 (defn apply_where [table where]
   (if (empty? where)
     (vec table)
@@ -148,8 +133,7 @@
                   row 
                   nil)))
             (seq (rest table)))) (first table)))
-        (throw (AssertionError. (str "Unknown column: \"" (where :column) "\""))))))
-)
+        (throw (AssertionError. (str "Unknown column: \"" (where :column) "\"")))))))
 
 ;; Filtring the columns in the result table
 (defn apply_filter [table columns]
@@ -160,22 +144,19 @@
             (find_index table_columns (rest select_columns)) 
             (if (> (.indexOf table_columns (first select_columns)) -1)
               (.indexOf table_columns (first select_columns))
-              (throw (AssertionError. (str "Unknown column: \"" (first select_columns) "\""))))))
-  )
+              (throw (AssertionError. (str "Unknown column: \"" (first select_columns) "\"")))))))
 
   (defn run_rows_filter [row column_list] 
     (if (empty? column_list)
       `()
-      (conj (run_rows_filter row (rest column_list)) (nth row (first column_list))))
-  )
+      (conj (run_rows_filter row (rest column_list)) (nth row (first column_list)))))
 
   (vec (cond 
     (= (first columns) "*") table
     (empty? table) table
     (empty? (find_index (first table) columns)) `()
     :else (let [column_list (vec (find_index (first table) columns))]
-      (map (fn [row] (vec (run_rows_filter row column_list))) table))))
-)
+      (map (fn [row] (vec (run_rows_filter row column_list))) table)))))
 
 ;; Formatting the result table
 (defn draw_table [table] 
@@ -192,8 +173,7 @@
             (first row)
             (add_symbols (if (= (mod (- (first len) (count (first row))) 2) 0) spaces_count (inc spaces_count)) " ")
             "|"
-            (draw_row (rest row) (rest len)))))) 
-  )
+            (draw_row (rest row) (rest len)))))))
 
   (if (empty? table)
     table
@@ -206,15 +186,13 @@
       (str/replace (str "|" (draw_row (first table))) #"[a-z]| |[1-9]" "_") 
       (str "|" (draw_row (first table)))
       (str (add_symbols (count (draw_row (first table))) "_") "\n")))
-      (str/replace (str "|" (draw_row (first table))) #"[a-z]| |[1-9]" "_")))
-)
+      (str/replace (str "|" (draw_row (first table))) #"[a-z]| |[1-9]" "_"))))
 
 ;; Getting distinct parameter
 (defn get_distinct [query]
   (if (str/includes? query "distinct")
     true
-    false)
-)
+    false))
 
 ;; Getting "where" conditions
 (defn get_where [query]
@@ -226,8 +204,7 @@
       :operation (if (str/includes? condition "<=") "<=" "<>") 
       :value (if (str/includes? condition "<=")
                 (str/trim (subs condition (+ (.indexOf condition "<=") 2) (count condition)))
-                (str/trim (subs condition (+ (.indexOf condition "<>") 2) (count condition)))))
-  )
+                (str/trim (subs condition (+ (.indexOf condition "<>") 2) (count condition))))))
 
   (defn handle_logic [where_string]
     (if (= where_string "")
@@ -243,8 +220,7 @@
             (handle_logic (str/trim (subs where_string (+ (.lastIndexOf where_string "and") 3) (count where_string))))
              "and"])
              
-        :else (create_map (str/trim where_string))))
-  )
+        :else (create_map (str/trim where_string)))))
 
   (try 
     (vec 
@@ -252,9 +228,7 @@
         (if (str/includes? query "where") 
         (subs query (+ (.indexOf query "where") 6) (.indexOf query ";")) 
         "")))
-    (catch Exception e (throw (AssertionError. "Invalid where conditions")))
-  )
-)
+    (catch Exception e (throw (AssertionError. "Invalid where conditions")))))
 
 ;; Getting column names from the query
 (defn get_columns [query]
@@ -265,8 +239,7 @@
         (str/trim (subs query (+ (.indexOf query "select") 7) (.indexOf query "from")))))
   
     (map (fn [s] (str/trim s)) (str/split column_string #","))
-  (catch Exception e (throw (AssertionError. "Invalid columns input"))))
-)
+  (catch Exception e (throw (AssertionError. "Invalid columns input")))))
 
 ;; Getting table name from the query
 (defn get_table [query]
@@ -277,17 +250,15 @@
         (if (str/includes? query "where") 
           (.indexOf (str/trim query) "where")
           (.indexOf (str/trim query) ";"))))
-    (catch Exception e (throw (AssertionError. "Invalid input"))))
-)
+    (catch Exception e (throw (AssertionError. "Invalid input")))))
 
 ;;Creating a hash-map with query parameters
-(defn get_params [query] 
+(defn get_params [query]
   (hash-map 
     :columns (get_columns query), 
     :table_name (get_table query), 
     :distinct (get_distinct query),
-    :where (get_where query))
-)
+    :where (get_where query)))
 
 ;; Main function
 (defn select [query]
@@ -304,15 +275,13 @@
           (apply_where 
             (apply_distinct table (params :distinct)) 
           (params :where)) 
-        (params :columns)))))
-)
+        (params :columns))))))
 
-
+;; CLI
 (defn cli [] 
   (let [input (read-line)]
     (select input))
-  (recur)
-)
+  (recur))
 
 (defn -main []
   ;;(cli)
