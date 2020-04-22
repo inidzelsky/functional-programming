@@ -112,28 +112,44 @@
         (recur (rest table) (conj hash (first (first table))) (conj result (first table)))))))
 
 ;; Filter rows by given conditions
-(defn apply_where [table where]
-  (if (empty? where)
-    (vec table)
-    (let [
-      comp_ind (.indexOf (first table) (where :column))
-      operation (where :operation)
-      value (Integer/parseInt (where :value))
-      ]
+(defn apply_where [table conditions]
+  (defn run_conditions 
+    ([conditions] (run_conditions conditions `()))
+    ([conditions stack] 
+      (cond
+        (empty? conditions) (vec (first stack))
+        (= (first conditions) "and") (recur (rest conditions) (conj (rest (rest stack)) (intersect (first stack) (second stack))))
+        (= (first conditions) "or") (recur (rest conditions) (conj (rest (rest stack)) (unite (first stack) (second stack))))
+        :else (recur (rest conditions) (conj stack (first conditions))))
+    )
+  )
+
+  (defn filter_condition [condition]
+    (try 
+      (let [
+        comp_ind (.indexOf (first table) (condition :column))
+        operation (condition :operation)
+        value (condition :value)
+        ]
     
-      (if (> comp_ind -1)
-        (vec (conj (remove nil? 
-          (map 
-            (fn [row] 
-              (if (= operation "<=")
-                (if (<= (Integer/parseInt (nth row comp_ind)) value)
-                  row
-                  nil)
-                (if-not (= (Integer/parseInt (nth row comp_ind)) value) 
-                  row 
-                  nil)))
-            (seq (rest table)))) (first table)))
-        (throw (AssertionError. (str "Unknown column: \"" (where :column) "\"")))))))
+        (if (> comp_ind -1)
+          (vec (conj (remove nil? 
+            (map 
+              (fn [row] 
+                (if (= operation "<=")
+                  (if (<= (Integer/parseInt (nth row comp_ind)) (Integer/parseInt value))
+                    row
+                    nil)
+                  (if-not (= (str (nth row comp_ind)) value) 
+                    row 
+                    nil)))
+              (seq (rest table)))) (first table)))
+          (throw (AssertionError. (str "Unknown column: \"" (condition :column) "\"")))))
+      (catch Exception e (throw (AssertionError. "Invalid comparison of value and columns types")))))
+
+  (if (empty? conditions)
+    (vec table)
+    (run_conditions (map (fn [el] (if (map? el) (filter_condition el) el)) conditions))))
 
 ;; Filtring the columns in the result table
 (defn apply_filter [table columns]
@@ -210,17 +226,17 @@
     (if (= where_string "")
       []
       (cond
-        (str/includes? where_string "or") 
+        (str/includes? where_string " or ") 
           (flatten [(handle_logic (str/trim (subs where_string 0 (.lastIndexOf where_string "or")))) 
             (handle_logic (str/trim (subs where_string (+ (.lastIndexOf where_string "or") 2) (count where_string))))
              "or"])
       
-        (str/includes? where_string "and") 
+        (str/includes? where_string " and ") 
           (flatten [(handle_logic (str/trim (subs where_string 0 (.lastIndexOf where_string "and")))) 
             (handle_logic (str/trim (subs where_string (+ (.lastIndexOf where_string "and") 3) (count where_string))))
              "and"])
              
-        :else (create_map (str/trim where_string)))))
+        :else [(create_map (str/trim where_string))])))
 
   (try 
     (vec 
@@ -228,7 +244,7 @@
         (if (str/includes? query "where") 
         (subs query (+ (.indexOf query "where") 6) (.indexOf query ";")) 
         "")))
-    (catch Exception e (throw (AssertionError. "Invalid where conditions")))))
+    (catch Exception e (throw (AssertionError. "Invalid where syntax")))))
 
 ;; Getting column names from the query
 (defn get_columns [query]
@@ -284,7 +300,7 @@
   (recur))
 
 (defn -main []
-  ;;(cli)
-  ;;(println (get_where "select * from mp-posts where id<>5 and ip<=8000 or mp_id<=5 and post_name<>\"Golovko\";"))
+  (cli)
+  ;;(println (get_where "select * from mp-posts where id<>5 and ip<=8000 or mp_id<=5;"))
 )
 
