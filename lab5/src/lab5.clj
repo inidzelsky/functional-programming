@@ -101,6 +101,8 @@
     (fn [row] (split_handler (conj (str/split row #"") "\t")))
     (str/split-lines (slurp file_name))))
 
+
+
 ;; Filter rows by uniqueness criteria
 (defn apply_distinct
   ([table distinct] (if distinct (apply_distinct table [] []) table))
@@ -204,7 +206,15 @@
       (str (add_symbols (count (draw_row (first table))) "_") "\n")))
       (str/replace (str "|" (draw_row (first table))) #"[a-z]| |[1-9]" "_"))))
 
-;; Getting distinct parameter
+;; Getting "order by" parameter
+(defn get_order_by [query]
+  (if (str/includes? query " order by ")
+    (cond
+      (str/includes? (subs query (.indexOf query " order by ")) "desc") "desc"
+      :else "asc")
+    nil))
+
+;; Getting "distinct" parameter
 (defn get_distinct [query]
   (if (str/includes? query "distinct")
     true
@@ -242,8 +252,8 @@
     (vec 
       (handle_logic 
         (if (str/includes? query "where") 
-        (subs query (+ (.indexOf query "where") 6) (.indexOf query ";")) 
-        "")))
+          (str/trim (subs query (+ (.indexOf query "where") 6) (.indexOf query (if-not (nil? (get_order_by query)) "order by" ";"))))
+          "")))
     (catch Exception e (throw (AssertionError. "Invalid where syntax")))))
 
 ;; Getting column names from the query
@@ -263,9 +273,10 @@
     (str/trim 
       (subs 
         (str/trim query) (+ (.indexOf (str/trim query) "from") 5) 
-        (if (str/includes? query "where") 
-          (.indexOf (str/trim query) "where")
-          (.indexOf (str/trim query) ";"))))
+        (cond 
+          (str/includes? query " where ") (.indexOf (str/trim query) "where")
+          (str/includes? query " order by") (.indexOf (str/trim query) " order by")
+          :else (.indexOf (str/trim query) ";"))))
     (catch Exception e (throw (AssertionError. "Invalid input")))))
 
 ;;Creating a hash-map with query parameters
@@ -274,7 +285,8 @@
     :columns (get_columns query), 
     :table_name (get_table query), 
     :distinct (get_distinct query),
-    :where (get_where query)))
+    :where (get_where query)
+    :order_by (get_order_by query)))
 
 ;; Main function
 (defn select [query]
