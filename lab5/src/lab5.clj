@@ -101,7 +101,8 @@
     (fn [row] (split_handler (conj (str/split row #"") "\t")))
     (str/split-lines (slurp file_name))))
 
-
+;; Sorts the result table
+(defn apply_order [table] ())
 
 ;; Filter rows by uniqueness criteria
 (defn apply_distinct
@@ -208,10 +209,24 @@
 
 ;; Getting "order by" parameter
 (defn get_order_by [query]
-  (if (str/includes? query " order by ")
-    (cond
-      (str/includes? (subs query (.indexOf query " order by ")) "desc") "desc"
-      :else "asc")
+  (if (str/includes? query " order by")
+    (hash-map
+      :direction 
+      (cond
+        (str/includes? query " desc") "desc"
+        :else "asc")
+      :columns 
+      (vec
+        (map
+        (fn [col] (str/trim col))
+          (str/split 
+            (subs query 
+              (+ (.indexOf query " order by ") 9) 
+              (cond 
+                (str/includes? query " asc") (.indexOf query " asc")
+                (str/includes? query " desc") (.indexOf query " desc")
+                :else (.indexOf query ";")))
+          #","))))
     nil))
 
 ;; Getting "distinct" parameter
@@ -252,7 +267,7 @@
     (vec 
       (handle_logic 
         (if (str/includes? query "where") 
-          (str/trim (subs query (+ (.indexOf query "where") 6) (.indexOf query (if-not (nil? (get_order_by query)) "order by" ";"))))
+          (str/trim (subs query (+ (.indexOf query "where") 6) (.indexOf query (if-not (nil? (get_order_by query)) " order by" ";"))))
           "")))
     (catch Exception e (throw (AssertionError. "Invalid where syntax")))))
 
@@ -285,7 +300,7 @@
     :columns (get_columns query), 
     :table_name (get_table query), 
     :distinct (get_distinct query),
-    :where (get_where query)
+    :where (get_where query),
     :order_by (get_order_by query)))
 
 ;; Main function
@@ -297,13 +312,15 @@
     (read_file (params :table_name) ["plenary_register_mps-skl9"]) (read_tsv (str (params :table_name) ".tsv"))
     :else (throw (AssertionError. (str "Couldn`t find a table with the name: \"" (params :table_name) "\"")))))
 
-  (println 
-    (str/join (draw_table 
-        (apply_filter 
-          (apply_where 
-            (apply_distinct table (params :distinct)) 
-          (params :where)) 
-        (params :columns))))))
+  ; (println 
+  ;   (str/join (draw_table 
+  ;       (apply_filter 
+  ;         (apply_where 
+  ;           (apply_distinct table (params :distinct)) 
+  ;         (params :where)) 
+  ;       (params :columns))))))
+
+  (println params))
 
 ;; CLI
 (defn cli [] 
