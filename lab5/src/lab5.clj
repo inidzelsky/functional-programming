@@ -3,10 +3,46 @@
     (:gen-class)
 )
 
-;; 
-(defn swap [table i1 i2] 
-  (concat (conj (subvec table 0 i1) (nth table i2)) (conj (subvec table (inc i1) i2) (nth table i1)) (subvec table (inc i2) (count table))))
+;; Swaps 2 elements of the vector 
+(defn swap 
+  ([table i1 i2] (if (<= i1 i2) (swap table i1 i2 true) (swap table i2 i1 true)))
+  ([table i1 i2 bool] 
+    (vec (concat (conj (subvec table 0 i1) (nth table i2)) (conj (subvec table (inc i1) i2) (nth table i1)) (subvec table (inc i2) (count table))))))
 
+(defn comp_mech [row1 row2 col]
+      (try 
+        (> (compare (Integer/parseInt (nth row1 col)) (Integer/parseInt (nth row2 col))) 0)
+      (catch Exception e (> (compare (nth row1 col) (nth row2 col)) 0))))
+
+(defn quick_sort [table col_ind]
+  (defn partiate [table i j]
+    (defn start [table i]
+      (if (and (< i (count table)) (comp_mech (nth table 0) (nth table i) col_ind))
+        (recur table (inc i))
+        i))
+        
+    (defn finish [table j]
+      (if (and (> j 0) (comp_mech (nth table j) (nth table 0) col_ind))
+        (recur table (dec j))
+        j))
+        
+    (def ni (start table i))
+    (def nj (finish table j))
+
+    (if (< ni nj) 
+      (recur (swap table ni nj) (inc ni) (dec nj))
+      (hash-map :table table :pointer ni)))
+
+
+  (if (<= (count table) 1)
+    table
+    (let [res (partiate table 1 (dec (count table)))]
+      (vec 
+        (concat
+          (quick_sort (subvec (res :table) 1 (res :pointer)) col_ind)
+          [(first (res :table))]
+          (quick_sort (subvec (res :table) (res :pointer) (count (res :table))) col_ind))))))
+  
 ;; Checks whether according elements of 2 vectors are equal 
 (defn rows_equal? [row1 row2] 
   (if (and (empty? row1) (empty? row2))
@@ -106,8 +142,21 @@
     (str/split-lines (slurp file_name))))
 
 ;; Sorts the result table
-(defn apply_order [table] 
-  ())
+(defn apply_order 
+  ([table params] 
+    (if (empty? params)
+      table
+    (if (empty? (params :columns)) 
+      (throw (AssertionError. "No columns provided in order by clause")) 
+      (apply_order table (params :columns) (params :direction)))))
+  ([table columns direction]
+    (if (empty? columns)
+      (if (= direction "asc")
+        table
+        (vec (conj (seq (reverse (rest table))) (first table)))) 
+      (if (< (.indexOf (first table) (first columns)) 0)
+        (throw (AssertionError. (str "Column " (first columns) " was not found")))
+        (apply_order (vec (conj (seq (quick_sort (vec (rest table)) (.indexOf (first table) (first columns)))) (first table))) (rest columns) direction)))))
 
 ;; Filter rows by uniqueness criteria
 (defn apply_distinct
@@ -317,15 +366,16 @@
     (read_file (params :table_name) ["plenary_register_mps-skl9"]) (read_tsv (str (params :table_name) ".tsv"))
     :else (throw (AssertionError. (str "Couldn`t find a table with the name: \"" (params :table_name) "\"")))))
 
-  ; (println 
-  ;   (str/join (draw_table 
-  ;       (apply_filter 
-  ;         (apply_where 
-  ;           (apply_distinct table (params :distinct)) 
-  ;         (params :where)) 
-  ;       (params :columns))))))
-
-  (println params))
+  (println 
+    (str/join 
+      (draw_table
+        (apply_order
+          (apply_filter 
+            (apply_where 
+              (apply_distinct table (params :distinct)) 
+            (params :where)) 
+          (params :columns))
+        (params :order_by))))))
 
 ;; CLI
 (defn cli [] 
@@ -334,7 +384,10 @@
   (recur))
 
 (defn -main []
-  ;;(cli)
+  ;(print (quick_sort [[3 2 3] [4 6 8] [1 3 6] [2 6 7]] 2))
+  (cli)
+  ;;(print (apply_order [["field"] ["Ceta"] ["Beta"] ["Alpha"] ["Acronim"]] (hash-map :columns ["field"] :direction "asc")))
+  ;;(print (insertion_sort [["field"] ["Ceta"] ["Beta"] ["Alpha"] ["Acronim"]] 0 1))
   ;;(println (get_where "select * from mp-posts where id<>5 and ip<=8000 or mp_id<=5;"))
 )
 
