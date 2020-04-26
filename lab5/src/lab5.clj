@@ -3,6 +3,10 @@
     (:gen-class)
 )
 
+;; 
+(defn swap [table i1 i2] 
+  (concat (conj (subvec table 0 i1) (nth table i2)) (conj (subvec table (inc i1) i2) (nth table i1)) (subvec table (inc i2) (count table))))
+
 ;; Checks whether according elements of 2 vectors are equal 
 (defn rows_equal? [row1 row2] 
   (if (and (empty? row1) (empty? row2))
@@ -102,7 +106,8 @@
     (str/split-lines (slurp file_name))))
 
 ;; Sorts the result table
-(defn apply_order [table] ())
+(defn apply_order [table] 
+  ())
 
 ;; Filter rows by uniqueness criteria
 (defn apply_distinct
@@ -329,7 +334,7 @@
   (recur))
 
 (defn -main []
-  (cli)
+  ;;(cli)
   ;;(println (get_where "select * from mp-posts where id<>5 and ip<=8000 or mp_id<=5;"))
 )
 
