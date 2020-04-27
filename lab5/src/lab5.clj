@@ -1,4 +1,5 @@
 (ns lab5
+    (:use [flatland.ordered.map])
     (:require [clojure.string :as str])
     (:gen-class)
 )
@@ -9,39 +10,46 @@
   ([table i1 i2 bool] 
     (vec (concat (conj (subvec table 0 i1) (nth table i2)) (conj (subvec table (inc i1) i2) (nth table i1)) (subvec table (inc i2) (count table))))))
 
-(defn comp_mech [row1 row2 col]
-      (try 
-        (> (compare (Integer/parseInt (nth row1 col)) (Integer/parseInt (nth row2 col))) 0)
-      (catch Exception e (> (compare (nth row1 col) (nth row2 col)) 0))))
+;; Quick sorting algorithm implementation
+(defn quick_sort [table column_index]
 
-(defn quick_sort [table col_ind]
+  ;; Compare mechanisms for strings and ints
+  (defn compare_mechanism [row1 row2 column_index]
+      (try 
+        (> (compare (Integer/parseInt (nth row1 column_index)) (Integer/parseInt (nth row2 column_index))) 0)
+      (catch Exception e (> (compare (nth row1 column_index) (nth row2 column_index)) 0))))
+
+  ;; Sorts elements of the list on smaller and larger than chosen
   (defn partiate [table i j]
+
+    ;; Searches for the larger element on the left side
     (defn start [table i]
-      (if (and (< i (count table)) (comp_mech (nth table 0) (nth table i) col_ind))
+      (if (and (< i (count table)) (compare_mechanism (nth table 0) (nth table i) column_index))
         (recur table (inc i))
         i))
-        
+    
+    ;; Searches for the smaller element on the right side
     (defn finish [table j]
-      (if (and (> j 0) (comp_mech (nth table j) (nth table 0) col_ind))
+      (if (and (> j 0) (compare_mechanism (nth table j) (nth table 0) column_index))
         (recur table (dec j))
         j))
-        
-    (def ni (start table i))
-    (def nj (finish table j))
+    
+    (let [ni (start table i)
+          nj (finish table j)]
 
+    ;; Swaps smaller and larger elements if they were found
     (if (< ni nj) 
       (recur (swap table ni nj) (inc ni) (dec nj))
-      (hash-map :table table :pointer ni)))
+      (hash-map :table table :pointer ni))))
 
-
-  (if (<= (count table) 1)
-    table
-    (let [res (partiate table 1 (dec (count table)))]
-      (vec 
-        (concat
-          (quick_sort (subvec (res :table) 1 (res :pointer)) col_ind)
-          [(first (res :table))]
-          (quick_sort (subvec (res :table) (res :pointer) (count (res :table))) col_ind))))))
+    (if (<= (count table) 1)
+      table
+      (let [res (partiate table 1 (dec (count table)))]
+        (vec 
+          (concat
+            (quick_sort (subvec (res :table) 1 (res :pointer)) column_index)
+            [(first (res :table))]
+            (quick_sort (subvec (res :table) (res :pointer) (count (res :table))) column_index))))))
   
 ;; Checks whether according elements of 2 vectors are equal 
 (defn rows_equal? [row1 row2] 
@@ -68,22 +76,6 @@
       (if (> (.indexOf (map (fn [row] (rows_equal? (first table1) row)) table2) true) -1)
         (first table1)
         nil))))))
-
-;; Finds in every column the length of the longest element
-(defn find_max_length [table]
-  (defn compare_vectors [vec1 vec2]
-    (if (empty? vec1)
-      (seq vec2)
-      (if (empty? vec2) 
-        (seq vec1) 
-        (conj (compare_vectors (rest vec1) (rest vec2)) (if (> (first vec1) (first vec2)) (first vec1) (first vec2))))))
-
-  (defn run_rows_max [table result] 
-    (if (empty? table)
-      result
-      (recur (rest table) (compare_vectors result (map (fn [element] (count element)) (first table))))))
-
-  (vec (run_rows_max table [])))
 
 ;; Creates a string of len length of symb
 (defn add_symbols [len symb] 
@@ -149,14 +141,49 @@
     (if (empty? (params :columns)) 
       (throw (AssertionError. "No columns provided in order by clause")) 
       (apply_order table (params :columns) (params :direction)))))
+
+
   ([table columns direction]
-    (if (empty? columns)
-      (if (= direction "asc")
-        table
-        (vec (conj (seq (reverse (rest table))) (first table)))) 
-      (if (< (.indexOf (first table) (first columns)) 0)
-        (throw (AssertionError. (str "Column " (first columns) " was not found")))
-        (apply_order (vec (conj (seq (quick_sort (vec (rest table)) (.indexOf (first table) (first columns)))) (first table))) (rest columns) direction)))))
+
+    ;; Creates inner vectors and inserts rows with the same value on column_index
+    (defn group_map [table column_index]
+      (defn run_rows [rows acc]
+        (if (empty? rows)
+          (vec (vals acc))
+          (let [key (nth (first rows) column_index) value (first rows)]
+            (if (contains? acc key)
+              (recur (rest rows) (assoc acc key (conj (acc key) value)))
+              (recur (rest rows) (assoc acc key [value]))))))
+
+        (if (string? (first (first table)))
+          (run_rows table (ordered-map))
+            (vec (map (fn [t] (group_map t column_index)) table))))
+
+    ;; Sorts every found group in the table
+    (defn sort_map [table column_ind]
+      (if (string? (first (first table)))
+        (quick_sort table column_ind)
+        (vec (map (fn [t] (sort_map t column_ind)) table))))
+    
+    ;; Pulls out all the rows from the groups
+    (defn pull_rows 
+      ([table row_length] (pull_rows (flatten table) [] row_length []))
+      ([table temp_row row_length acc]
+        (if (empty? table)
+          (seq acc)
+          (if (= (count temp_row) row_length)
+            (recur (rest table) [(first table)] row_length (conj acc temp_row))
+            (recur (rest table) (conj temp_row (first table)) row_length acc)))))
+
+    (let [column_index (.indexOf (first table) (first columns))] 
+      (if (> column_index -1)
+        (let [sorted_table (sort_map (vec (rest table)) column_index)]
+          (if (empty? (rest columns))
+            (if (= direction "asc")
+              (vec (conj (pull_rows sorted_table (count (first table))) (first table)))
+              (vec (conj (reverse (pull_rows sorted_table (count (first table)))) (first table))))
+            (apply_order (vec (conj (seq (group_map sorted_table column_index)) (first table))) (rest columns) direction)))
+        (throw (AssertionError. (str "Column " (first columns) " was not found")))))))
 
 ;; Filter rows by uniqueness criteria
 (defn apply_distinct
@@ -170,6 +197,8 @@
 
 ;; Filter rows by given conditions
 (defn apply_where [table conditions]
+
+  ;; Defines the order of operations with the table
   (defn run_conditions 
     ([conditions] (run_conditions conditions `()))
     ([conditions stack] 
@@ -181,6 +210,7 @@
     )
   )
 
+  ;; Filters table with the given condition
   (defn filter_condition [condition]
     (try 
       (let [
@@ -210,15 +240,18 @@
 
 ;; Filtring the columns in the result table
 (defn apply_filter [table columns]
+
+  ;; Finds indexes of given columns
   (defn find_index [table_columns select_columns]
     (if (empty? select_columns)
       `()
-          (conj 
-            (find_index table_columns (rest select_columns)) 
-            (if (> (.indexOf table_columns (first select_columns)) -1)
-              (.indexOf table_columns (first select_columns))
-              (throw (AssertionError. (str "Unknown column: \"" (first select_columns) "\"")))))))
+      (conj 
+        (find_index table_columns (rest select_columns)) 
+          (if (> (.indexOf table_columns (first select_columns)) -1)
+            (.indexOf table_columns (first select_columns))
+            (throw (AssertionError. (str "Unknown column: \"" (first select_columns) "\"")))))))
 
+  ;; Takes a row and filters it with column_list indexes
   (defn run_rows_filter [row column_list] 
     (if (empty? column_list)
       `()
@@ -231,22 +264,41 @@
     :else (let [column_list (vec (find_index (first table) columns))]
       (map (fn [row] (vec (run_rows_filter row column_list))) table)))))
 
-;; Formatting the result table
-(defn draw_table [table] 
+;; Formatting the result table for printing
+(defn format_table [table] 
+
+  ;; Finds in every column the length of the longest element
+  (defn find_max_length [table]
+    (defn compare_vectors [vec1 vec2]
+      (if (empty? vec1)
+        (seq vec2)
+        (if (empty? vec2) 
+          (seq vec1) 
+          (conj (compare_vectors (rest vec1) (rest vec2)) (if (> (first vec1) (first vec2)) (first vec1) (first vec2))))))
+
+      (defn run_rows_max [table result] 
+        (if (empty? table)
+          result
+          (recur (rest table) (compare_vectors result (map (fn [element] (count element)) (first table))))))
+
+  (vec (run_rows_max table [])))
+
+  ;; Vector with max length of each column
   (def length_vec (find_max_length table))
 
-  (defn draw_row 
-    ([row] (draw_row row length_vec))
+  ;; Formats row
+  (defn format_row 
+    ([row] (format_row row length_vec))
     ([row len] 
       (if (empty? row)
         "\n"
         (let [spaces_count (quot (- (first len) (count (first row))) 2)] 
           (str 
-            (add_symbols spaces_count " ")
-            (first row)
             (add_symbols (if (= (mod (- (first len) (count (first row))) 2) 0) spaces_count (inc spaces_count)) " ")
+            (first row)
+            (add_symbols spaces_count " ")
             "|"
-            (draw_row (rest row) (rest len)))))))
+            (format_row (rest row) (rest len)))))))
 
   (if (empty? table)
     table
@@ -254,12 +306,12 @@
       (seq (map 
         (fn [row] (str "|" row)) 
         (map 
-          draw_row
+          format_row
           (rest table))))
-      (str/replace (str "|" (draw_row (first table))) #"[a-z]| |[1-9]" "_") 
-      (str "|" (draw_row (first table)))
-      (str (add_symbols (count (draw_row (first table))) "_") "\n")))
-      (str/replace (str "|" (draw_row (first table))) #"[a-z]| |[1-9]" "_"))))
+      (str/replace (str "|" (format_row (first table))) #"[a-z]| |[1-9]" "_") 
+      (str "|" (format_row (first table)))
+      (str (add_symbols (count (format_row (first table))) "_") "\n")))
+      (str/replace (str "|" (format_row (first table))) #"[a-z]| |[1-9]" "_"))))
 
 ;; Getting "order by" parameter
 (defn get_order_by [query]
@@ -291,6 +343,8 @@
 
 ;; Getting "where" conditions
 (defn get_where [query]
+  ;
+  ; Creates a hash-map with parameters
   (defn create_map [condition]
     (hash-map
       :column (if (str/includes? condition "<=") 
@@ -301,6 +355,7 @@
                 (str/trim (subs condition (+ (.indexOf condition "<=") 2) (count condition)))
                 (str/trim (subs condition (+ (.indexOf condition "<>") 2) (count condition))))))
 
+  ;; Creates parameters vector from the string
   (defn handle_logic [where_string]
     (if (= where_string "")
       []
@@ -368,7 +423,7 @@
 
   (println 
     (str/join 
-      (draw_table
+      (format_table
         (apply_order
           (apply_filter 
             (apply_where 
@@ -384,10 +439,5 @@
   (recur))
 
 (defn -main []
-  ;(print (quick_sort [[3 2 3] [4 6 8] [1 3 6] [2 6 7]] 2))
-  (cli)
-  ;;(print (apply_order [["field"] ["Ceta"] ["Beta"] ["Alpha"] ["Acronim"]] (hash-map :columns ["field"] :direction "asc")))
-  ;;(print (insertion_sort [["field"] ["Ceta"] ["Beta"] ["Alpha"] ["Acronim"]] 0 1))
-  ;;(println (get_where "select * from mp-posts where id<>5 and ip<=8000 or mp_id<=5;"))
-)
+  (cli))
 
