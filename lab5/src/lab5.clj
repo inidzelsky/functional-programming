@@ -446,6 +446,19 @@
           :else (.indexOf (str/trim query) ";"))))
     (catch Exception e (throw (AssertionError. "Invalid input")))))
 
+;; Getting aggregate function and column name from the query
+(defn get_aggregate [query]
+  (cond 
+    (str/includes? query "avg(") 
+      (hash-map 
+        :function "avg" 
+        :column_name (subs query (+ (.indexOf query "avg(") 4) (.indexOf query ")")))
+    (str/includes? query "max(")
+      (hash-map 
+        :function "max" 
+        :column_name (subs query (+ (.indexOf query "max(") 4) (.indexOf query ")")))
+        :else {}))
+
 ;;Creating a hash-map with query parameters
 (defn get_params [query]
   (hash-map 
@@ -453,7 +466,8 @@
     :table_name (get_table query), 
     :distinct (get_distinct query),
     :where (get_where query),
-    :order_by (get_order_by query)))
+    :order_by (get_order_by query)
+    :aggregate (get_aggregate query)))
 
 ;; Main function
 (defn select [query]
@@ -467,13 +481,15 @@
   (println 
     (str/join 
       (format_table
-        (apply_order
-          (apply_filter 
-            (apply_where 
-              (apply_distinct table (params :distinct)) 
-            (params :where)) 
-          (params :columns))
-        (params :order_by))))))
+        (if (empty? (params :aggregate))
+          (apply_order
+            (apply_filter 
+              (apply_where 
+                (apply_distinct table (params :distinct)) 
+              (params :where)) 
+            (params :columns))
+          (params :order_by))
+          (apply_aggregate table (params :aggregate)))))))
 
 ;; CLI
 (defn cli [] 
@@ -482,6 +498,5 @@
   (recur))
 
 (defn -main []
-  (cli)
-  )
+  (cli))
 
