@@ -135,30 +135,36 @@
 
 ;; Applyies aggregate functions on column
 (defn apply_aggregate [table params]
+
   ;; Counts average value of the column
   (defn agg_avg
     ([table column_index] 
       (vector [(str "avg(" (nth (first table) column_index) ")")] [(agg_avg (rest table) column_index (hash-map :count (count (rest table)) :res 0))]))
 
     ([table column_index acc]
+      (try
         (if (empty? table)
           (str (/ (float (acc :res)) (acc :count)))
           (if (= (nth (first table) column_index) "null")
             (agg_avg (rest table) column_index (assoc acc :count (dec (acc :count))))
-            (agg_avg (rest table) column_index (assoc acc :res (+ (acc :res) (Integer/parseInt (nth (first table) column_index))))))
-          )))
+            (agg_avg (rest table) column_index (assoc acc :res (+ (acc :res) (Integer/parseInt (nth (first table) column_index)))))))
+        (catch NumberFormatException e (throw (AssertionError. "Can`t apply avg function on string"))))))
 
   ;; Counts max value of the column
   (defn agg_max
     ([table column_index]
-      (vector [(str "max(" (nth (first table) column_index) ")")] [(agg_max (rest table) column_index (Integer/parseInt (nth (first (rest table)) column_index)))]))
+      (try
+        (vector [(str "max(" (nth (first table) column_index) ")")] [(agg_max (rest table) column_index (Integer/parseInt (nth (first (rest table)) column_index)))])
+        (catch NumberFormatException e (throw (AssertionError. "Can`t apply avg function on string")))))
 
      ([table column_index acc]
+        (try
          (if (empty? table)
            (str acc)
            (if (or (= (nth (first table) column_index) "null") (< (Integer/parseInt (nth (first table) column_index)) acc))
             (agg_max (rest table) column_index acc)
-            (agg_max (rest table) column_index (Integer/parseInt (nth (first table) column_index)))))))
+            (agg_max (rest table) column_index (Integer/parseInt (nth (first table) column_index)))))
+          (catch NumberFormatException e (throw (AssertionError. "Can`t apply avg function on string"))))))
            
 
   (let [column_index (.indexOf (first table) (params :column_name))]
@@ -476,7 +482,6 @@
   (recur))
 
 (defn -main []
-  ;;(cli)
-  (print (format_table (apply_aggregate [["id" "name"] ["1" "Ilya"] ["5" "Ihor"] ["null" "Kate"] ["6" "Mary"] ["7" "Nastia"] ["8" "Sasha"] ["null" "Ksusha"]] {:function "max" :column_name "id"})))
+  (cli)
   )
 
