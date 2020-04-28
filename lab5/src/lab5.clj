@@ -133,6 +133,43 @@
     (fn [row] (split_handler (conj (str/split row #"") "\t")))
     (str/split-lines (slurp file_name))))
 
+;; Applyies aggregate functions on column
+(defn apply_aggregate [table params]
+  ;; Counts average value of the column
+  (defn agg_avg
+    ([table column_index] 
+      (vector [(str "avg(" (nth (first table) column_index) ")")] [(agg_avg (rest table) column_index (hash-map :count (count (rest table)) :res 0))]))
+
+    ([table column_index acc]
+        (if (empty? table)
+          (str (/ (float (acc :res)) (acc :count)))
+          (if (= (nth (first table) column_index) "null")
+            (agg_avg (rest table) column_index (assoc acc :count (dec (acc :count))))
+            (agg_avg (rest table) column_index (assoc acc :res (+ (acc :res) (Integer/parseInt (nth (first table) column_index))))))
+          )))
+
+  ;; Counts max value of the column
+  (defn agg_max
+    ([table column_index]
+      (vector [(str "max(" (nth (first table) column_index) ")")] [(agg_max (rest table) column_index (Integer/parseInt (nth (first (rest table)) column_index)))]))
+
+     ([table column_index acc]
+         (if (empty? table)
+           (str acc)
+           (if (or (= (nth (first table) column_index) "null") (< (Integer/parseInt (nth (first table) column_index)) acc))
+            (agg_max (rest table) column_index acc)
+            (agg_max (rest table) column_index (Integer/parseInt (nth (first table) column_index)))))))
+           
+
+  (let [column_index (.indexOf (first table) (params :column_name))]
+    (if (> column_index -1)
+      (cond
+        (= (params :function) "avg") (agg_avg table column_index)
+        (= (params :function) "max") (agg_max table column_index)
+        :else (throw (AssertionError. (str "Unknown function " (params :function))))) 
+      (throw (AssertionError. (str "Unknown column name " (params :column_name)))))
+  ))
+
 ;; Sorts the result table
 (defn apply_order 
   ([table params] 
@@ -308,10 +345,10 @@
         (map 
           format_row
           (rest table))))
-      (str/replace (str "|" (format_row (first table))) #"[a-z]| |[1-9]" "_") 
+      (str/replace (str "|" (format_row (first table))) #"[^|\n\t_]" "_") 
       (str "|" (format_row (first table)))
       (str (add_symbols (count (format_row (first table))) "_") "\n")))
-      (str/replace (str "|" (format_row (first table))) #"[a-z]| |[1-9]" "_"))))
+      (str/replace (str "|" (format_row (first table))) #"[^|\n\t_]" "_"))))
 
 ;; Getting "order by" parameter
 (defn get_order_by [query]
@@ -439,5 +476,7 @@
   (recur))
 
 (defn -main []
-  (cli))
+  ;;(cli)
+  (print (format_table (apply_aggregate [["id" "name"] ["1" "Ilya"] ["5" "Ihor"] ["null" "Kate"] ["6" "Mary"] ["7" "Nastia"] ["8" "Sasha"] ["null" "Ksusha"]] {:function "max" :column_name "id"})))
+  )
 
