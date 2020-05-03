@@ -51,31 +51,43 @@
             [(first (res :table))]
             (quick_sort (subvec (res :table) (res :pointer) (count (res :table))) column_index))))))
   
-;; Checks whether according elements of 2 vectors are equal 
-(defn rows_equal? [row1 row2] 
-  (if (and (empty? row1) (empty? row2))
-    true
-    (if (= (first row1) (first row2))
-      (recur (rest row1) (rest row2))
-      false)))
-
 ;; Unites 2 tables
-(defn unite [table1 table2] 
+(defn unite [table1 table2]
+  (defn rows_equal_unite [row1 row2] 
+    (if (and (empty? row1) (empty? row2))
+      true
+      (if (= (first row1) (first row2))
+        (recur (rest row1) (rest row2))
+        false)))
+
+  (defn compare_mechanism_unites [first table]
+      (> (.indexOf (map (fn [row] (rows_equal_unite first row)) table) true) -1))
+
   (if (empty? table1)
     (vec table2)
-    (if (> (.indexOf (map (fn [row] (rows_equal? (first table1) row)) table2) true) -1)
+    (if (compare_mechanism_unites (first table1) table2)
       (unite (rest table1) table2)
       (unite (rest table1) (conj table2 (first table1))))))
 
 ;; Intersects 2 tables
-(defn intersect [table1 table2] 
-  (if (empty? table1)
-    `()
-    (vec (remove nil? (conj 
-      (seq (intersect (rest table1) table2))
-      (if (> (.indexOf (map (fn [row] (rows_equal? (first table1) row)) table2) true) -1)
-        (first table1)
-        nil))))))
+(defn intersect 
+  ([table1 table2] (intersect table1 table2 []))
+  ([table1 table2 acc]
+    (defn rows_equal_intersect [row1 row2] 
+      (if (and (empty? row1) (empty? row2))
+        true
+        (if (= (first row1) (first row2))
+          (recur (rest row1) (rest row2))
+          false)))
+
+    (defn compare_mechanism_intersect [first table]
+      (> (.indexOf (map (fn [row] (rows_equal_intersect first row)) table) true) -1))
+
+    (if (empty? table1)
+      (vec acc)
+      (if (compare_mechanism_intersect (first table1) table2)
+        (intersect (rest table1) table2 (conj acc (first table1)))
+        (intersect (rest table1) table2 acc)))))
 
 ;; Creates a string of len length of symb
 (defn add_symbols [len symb] 
