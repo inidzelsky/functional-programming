@@ -66,8 +66,8 @@
   (if (empty? table1)
     (vec table2)
     (if (compare_mechanism_unites (first table1) table2)
-      (unite (rest table1) table2)
-      (unite (rest table1) (conj table2 (first table1))))))
+      (recur (rest table1) table2)
+      (recur (rest table1) (conj table2 (first table1))))))
 
 ;; Intersects 2 tables
 (defn intersect 
@@ -86,8 +86,8 @@
     (if (empty? table1)
       (vec acc)
       (if (compare_mechanism_intersect (first table1) table2)
-        (intersect (rest table1) table2 (conj acc (first table1)))
-        (intersect (rest table1) table2 acc)))))
+        (recur (rest table1) table2 (conj acc (first table1)))
+        (recur (rest table1) table2 acc)))))
 
 ;; Creates a string of len length of symb
 (defn add_symbols [len symb] 
@@ -259,11 +259,9 @@
     ([conditions stack] 
       (cond
         (empty? conditions) (vec (first stack))
-        (= (first conditions) "and") (recur (rest conditions) (conj (rest (rest stack)) (intersect (first stack) (second stack))))
-        (= (first conditions) "or") (recur (rest conditions) (conj (rest (rest stack)) (unite (first stack) (second stack))))
-        :else (recur (rest conditions) (conj stack (first conditions))))
-    )
-  )
+        (= (first conditions) "and") (recur (rest conditions) (conj (seq (rest (rest stack))) (intersect (first stack) (second stack))))
+        (= (first conditions) "or") (recur (rest conditions) (conj (seq (rest (rest stack))) (unite (first stack) (second stack))))
+        :else (recur (rest conditions) (conj (seq stack) (first conditions))))))
 
   ;; Filters table with the given condition
   (defn filter_condition [condition]
@@ -275,17 +273,13 @@
         ]
     
         (if (> comp_ind -1)
-          (vec (conj (remove nil? 
-            (map 
+          (vec (conj
+            (filter
               (fn [row] 
                 (if (= operation "<=")
-                  (if (<= (Integer/parseInt (nth row comp_ind)) (Integer/parseInt value))
-                    row
-                    nil)
-                  (if-not (= (str (nth row comp_ind)) value) 
-                    row 
-                    nil)))
-              (seq (rest table)))) (first table)))
+                  (<= (Integer/parseInt (nth row comp_ind)) (Integer/parseInt value))
+                  (not (= (str (nth row comp_ind)) value))))
+              (seq (rest table))) (first table)))
           (throw (AssertionError. (str "Unknown column: \"" (condition :column) "\"")))))
       (catch Exception e (throw (AssertionError. "Invalid comparison of value and columns types")))))
 
