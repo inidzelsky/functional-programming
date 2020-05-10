@@ -197,20 +197,36 @@
                       nil)) 
                   table1)))))))
 
+      (defn left_join 
+        ([table1 table2] 
+          (conj 
+            (seq (left_join (rest table1) (rest table2) []))
+            (append 
+              (first table1) 
+              (change_column_names (params :table2) (first table2)))))
+
+        ([table1 table2 acc]
+        (if (empty? table1)
+          acc
+          (let [matches (remove nil? (map (fn [row] (if (= (nth (first table1) index1) (nth row index2)) (append (first table1) row) nil)) table2))]
+            (if (empty? matches) 
+              (recur (rest table1) table2 (append acc [(append (first table1) (map (fn [el] "null") (first table2)))]))
+              (recur (rest table1) table2 (append acc matches)))))))
+
       (defn right_join 
         ([table1 table2] 
           (conj 
             (seq (right_join (rest table1) (rest table2) []))
             (append 
-              (first table2) 
+              (first table1) 
               (change_column_names (params :table2) (first table2)))))
 
         ([table1 table2 acc]
         (if (empty? table2)
           acc
-          (let [matches (remove nil? (map (fn [row] (if (= (nth (first table2) index2) (nth row index1)) (append (first table2) row) nil)) table1))]
+          (let [matches (remove nil? (map (fn [row] (if (= (nth (first table2) index2) (nth row index1)) (append row (first table2)) nil)) table1))]
             (if (empty? matches) 
-              (recur table1 (rest table2) (append acc [(append (first table2) (map (fn [el] "null") (first table1)))]))
+              (recur table1 (rest table2) (append acc [(append (map (fn [el] "null") (first table1)) (first table2))]))
               (recur table1 (rest table2) (append acc matches)))))))
 
       (defn full_outer_join
@@ -222,25 +238,7 @@
               (change_column_names (params :table2) (first table2)))))
 
         ([table1 table2 main]
-          (defn dif1 [table1 table2 acc]
-            (if (empty? table1)
-              acc
-              (if (empty? (remove nil? (map (fn [row] (if (= (nth (first table1) index1) (nth row index2)) row nil)) table2)))
-                (recur (rest table1) table2 (conj acc (append (first table1) (map (fn [el] "null") (first table2)))))
-                (recur (rest table1) table2 acc))))
-
-          (defn dif2 [table1 table2 acc]
-            (if (empty? table2)
-              acc
-              (if (empty? (remove nil? (map (fn [row] (if (= (nth (first table2) index2) (nth row index1)) row nil)) table1)))
-                (recur table1 (rest table2) (conj acc (append (map (fn [el] "null") (first table1)) (first table2))))
-                (recur table1 (rest table2) acc))))
-
-          (append 
-            (append 
-              (inner_join table1 table2 []) 
-              (dif1 table1 table2 [])) 
-            (dif2 table1 table2 []))))
+          (unite (left_join table1 table2 []) (right_join table1 table2 []))))
 
       (cond 
         (< index1 0) (throw (AssertionError. (str "Unfound column \"" (params :column_name1) "\"")))
