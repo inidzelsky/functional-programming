@@ -7,9 +7,9 @@
 ;; Appends 2 lists
 (defn append [list1 list2]
   (cond
-    (empty? list2) list1
-    (empty? list1) list2
-    :else (recur (conj list1 (first list2)) (rest list2))))
+    (empty? list2) (vec list1)
+    (empty? list1) (vec list2)
+    :else (recur (conj (vec list1) (first list2)) (rest list2))))
 
 ;; Swaps 2 elements of the vector 
 (defn swap 
@@ -159,9 +159,9 @@
 ;; Parses table by file type
 (defn parse_table [table_name] 
     (vec (remove empty? (cond 
-      (read_file table_name ["mp-election"]) (read_txt (str table_name ".txt"))
-      (read_file table_name ["mp-assistants" "map_zal-skl9" "mp-posts_full"]) (read_csv (str table_name ".csv"))
-      (read_file table_name ["plenary_register_mps-skl9"]) (read_tsv (str table_name ".tsv"))
+      (read_file table_name ["election"]) (read_txt (str table_name ".txt"))
+      (read_file table_name ["assistants" "zal" "posts"]) (read_csv (str table_name ".csv"))
+      (read_file table_name ["register"]) (read_tsv (str table_name ".tsv"))
       :else (throw (AssertionError. (str "Couldn`t find a table with the name: \"" table_name "\"")))))))
 
 ;; Concates 2 tables horizontally on the same column value
@@ -172,11 +172,22 @@
       table2 (parse_table (params :table2))
       index1 (.indexOf (first table1) (params :column_name1))
       index2 (.indexOf (first table2) (params :column_name2))]
-          
-      (defn inner_join [table1 table2 index1 index2 acc]
+
+      (defn change_column_names [table_name columns]
+        (map (fn [col] (str table_name "." col)) columns))
+
+      (defn inner_join
+        ([table1 table2] 
+          (conj 
+            (inner_join (rest table1) (rest table2) []) 
+            (append 
+              (first table1) 
+              (change_column_names (params :table2) (first table2)))))
+
+        ([table1 table2 acc]
         (if (empty? table2)
-          acc
-          (recur table1 (rest table2) index1 index2 
+          (seq acc)
+          (recur table1 (rest table2)
             (append acc 
               (remove nil? 
                 (map 
@@ -184,12 +195,59 @@
                     (if (= (nth row index1) (nth (first table2) index2)) 
                       (append row (first table2))  
                       nil)) 
-                  table1))))))
+                  table1)))))))
+
+      (defn right_join 
+        ([table1 table2] 
+          (conj 
+            (seq (right_join (rest table1) (rest table2) []))
+            (append 
+              (first table2) 
+              (change_column_names (params :table2) (first table2)))))
+
+        ([table1 table2 acc]
+        (if (empty? table2)
+          acc
+          (let [matches (remove nil? (map (fn [row] (if (= (nth (first table2) index2) (nth row index1)) (append (first table2) row) nil)) table1))]
+            (if (empty? matches) 
+              (recur table1 (rest table2) (append acc [(append (first table2) (map (fn [el] "null") (first table1)))]))
+              (recur table1 (rest table2) (append acc matches)))))))
+
+      (defn full_outer_join
+        ([table1 table2] 
+          (conj 
+            (seq (full_outer_join (rest table1) (rest table2) true)) 
+            (append 
+              (first table1) 
+              (change_column_names (params :table2) (first table2)))))
+
+        ([table1 table2 main]
+          (defn dif1 [table1 table2 acc]
+            (if (empty? table1)
+              acc
+              (if (empty? (remove nil? (map (fn [row] (if (= (nth (first table1) index1) (nth row index2)) row nil)) table2)))
+                (recur (rest table1) table2 (conj acc (append (first table1) (map (fn [el] "null") (first table2)))))
+                (recur (rest table1) table2 acc))))
+
+          (defn dif2 [table1 table2 acc]
+            (if (empty? table2)
+              acc
+              (if (empty? (remove nil? (map (fn [row] (if (= (nth (first table2) index2) (nth row index1)) row nil)) table1)))
+                (recur table1 (rest table2) (conj acc (append (map (fn [el] "null") (first table1)) (first table2))))
+                (recur table1 (rest table2) acc))))
+
+          (append 
+            (append 
+              (inner_join table1 table2 []) 
+              (dif1 table1 table2 [])) 
+            (dif2 table1 table2 []))))
 
       (cond 
         (< index1 0) (throw (AssertionError. (str "Unfound column \"" (params :column_name1) "\"")))
         (< index2 0) (throw (AssertionError. (str "Unfound column \"" (params :column_name2) "\"")))
-        (= type "inner") (vec (conj (inner_join (rest table1) (rest table2) index1 index2 []) (concat (first table1) (first table2))))))
+        (= type "inner") (vec (inner_join table1 table2))
+        (= type "right") (vec (right_join table1 table2))
+        (= type "full") (vec (full_outer_join table1 table2))))    
     table1))
 
 ;; Applyies aggregate functions on column
@@ -388,11 +446,11 @@
       (if (empty? row)
         "\n"
         (let [spaces_count (quot (- (first len) (count (first row))) 2)] 
-          (str 
-            (add_symbols (if (= (mod (- (first len) (count (first row))) 2) 0) spaces_count (inc spaces_count)) " ")
+          (str
+            (add_symbols (inc (if (= (mod (- (first len) (count (first row))) 2) 0) spaces_count (inc spaces_count))) " ")
             (first row)
             (add_symbols spaces_count " ")
-            "|"
+            " |"
             (format_row (rest row) (rest len)))))))
 
   (if (empty? table)
@@ -419,7 +477,7 @@
      (hash-map 
         :type (cond 
                 (str/includes? query " inner join ") "inner"
-                (str/includes? query " full outer join ") "outer"
+                (str/includes? query " full outer join ") "full"
                 (str/includes? query " right join ") "right")
         :table2 (str/trim (subs subquery 0 (.indexOf subquery " on ")))
         :column_name1 (str/trim (subs (subs subquery (+ (.indexOf subquery " on ") 4) (.indexOf subquery " = ")) (inc (.indexOf (subs subquery (+ (.indexOf subquery " on ") 4) (.indexOf subquery " = ")) "."))))
