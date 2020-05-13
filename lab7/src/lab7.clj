@@ -254,7 +254,7 @@
   ;; Counts average value of the column
   (defn agg_avg
     ([table column_index] 
-      (vector [(str "avg(" (nth (first table) column_index) ")")] [(agg_avg (rest table) column_index (hash-map :count (count (rest table)) :res 0))]))
+      (agg_avg table column_index (hash-map :count (count table) :res 0)))
 
     ([table column_index acc]
       (try
@@ -266,30 +266,63 @@
         (catch NumberFormatException e (throw (AssertionError. "Can`t apply avg function on string"))))))
 
   ;; Counts max value of the column
-  (defn agg_max
-    ([table column_index]
-      (try
-        (vector [(str "max(" (nth (first table) column_index) ")")] [(agg_max (rest table) column_index (Integer/parseInt (nth (first (rest table)) column_index)))])
-        (catch NumberFormatException e (throw (AssertionError. "Can`t apply avg function on string")))))
+  (defn agg_max [table column_index]
+      (str (apply max (remove nil? (map 
+        (fn [row] 
+          (try
+            (if (= (nth row column_index) "null") 
+              nil
+              (Integer/parseInt (nth row column_index)))
+          (catch NumberFormatException e (throw (AssertionError. "Can`t apply avg function on string"))))) table)))))
 
-     ([table column_index acc]
-        (try
-         (if (empty? table)
-           (str acc)
-           (if (or (= (nth (first table) column_index) "null") (< (Integer/parseInt (nth (first table) column_index)) acc))
-            (agg_max (rest table) column_index acc)
-            (agg_max (rest table) column_index (Integer/parseInt (nth (first table) column_index)))))
-          (catch NumberFormatException e (throw (AssertionError. "Can`t apply avg function on string"))))))
-           
+  (defn agg_min [table column_index]
+      (str (apply min (remove nil? (map 
+        (fn [row] 
+          (try
+            (if (= (nth row column_index) "null") 
+              nil
+              (Integer/parseInt (nth row column_index)))
+          (catch NumberFormatException e (throw (AssertionError. "Can`t apply avg function on string"))))) table)))))
 
-  (let [column_index (.indexOf (first table) (params :column_name))]
-    (if (> column_index -1)
-      (cond
-        (= (params :function) "avg") (agg_avg table column_index)
-        (= (params :function) "max") (agg_max table column_index)
-        :else (throw (AssertionError. (str "Unknown function " (params :function))))) 
-      (throw (AssertionError. (str "Unknown column name " (params :column_name)))))
-  ))
+  (defn agg_count [table column_index]
+    (str (if (= column_index -1) 
+      (count table)
+      (count 
+        (remove nil? 
+          (map 
+            (fn [row] (if (= (nth row column_index) "null") nil row)) 
+            table))))))
+  
+  (defn apply_fun [table param fun column_index]
+    (defn map_table []
+      (map 
+        (fn [subtable] 
+          (vec 
+            (conj 
+              (seq (rest subtable)) 
+              (conj (first subtable) (fun subtable column_index))))) 
+        (rest table)))
+
+    (defn connect_header [vals]
+      (conj vals [(conj (first (first table)) (str (param :function) "(" (param :column_name) ")"))]))
+
+
+      (vec (connect_header (map_table))))
+
+  (if (empty? params)
+    table
+    (let [param (first params) column_index (.indexOf (first (first table)) (param :column_name))]
+      (if (or (and (= (param :column_name) "*") (= (param :function) "count")) (> column_index -1))
+        (recur 
+          (cond
+            (= (param :function) "count") (apply_fun table param agg_count column_index)
+            (= (param :function) "avg") (apply_fun table param agg_avg column_index)
+            (= (param :function) "max") (apply_fun table param agg_max column_index)
+            (= (param :function) "min") (apply_fun table param agg_min column_index)
+            :else (throw (AssertionError. (str "Unknown function " (param :function))))) 
+          (rest params))
+        (throw (AssertionError. (str "Unknown column name " (param :column_name)))))
+  )))
 
 ;; Sorts the result table
 (defn apply_order 
@@ -343,7 +376,7 @@
         (throw (AssertionError. (str "Column " (first columns) " was not found")))))))
 
 ;; Creates inner tables on given criterias
-(defn apply_group [table names]
+(defn apply_group [table names agg_params]
   (defn gen_key [cols]
    (subs (str/join "_" cols) 0 (count (str/join "_" cols))))
 
@@ -357,12 +390,17 @@
             (recur (rest table) indexs (assoc acc key (conj (acc key) (first table))))
             (recur (rest table) indexs (assoc acc key [(first table)])))))))
 
-  (if (empty? names) 
-    (throw (AssertionError. "Should be at least one column in the \"group by\" clause"))
-    (let [indexs (map (fn [name] (if (> (.indexOf (first table) name) -1) (.indexOf (first table) name) nil)) names)]
-      (if (> (.indexOf indexs nil) -1) 
-        (throw (AssertionError. (str "Unfound column name \"" (nth names (.indexOf indexs nil)) "\"")))
-        (group_rows table indexs)))))
+  (defn gather_table [table]
+    (vec (map (fn [subtable] (first subtable)) table)))
+
+  (if (nil? names)
+    table
+    (if (empty? names) 
+      (throw (AssertionError. "Should be at least one column in the \"group by\" clause"))
+      (let [indexs (map (fn [name] (if (> (.indexOf (first table) name) -1) (.indexOf (first table) name) nil)) names)]
+        (if (> (.indexOf indexs nil) -1) 
+          (throw (AssertionError. (str "Unfound column name \"" (nth names (.indexOf indexs nil)) "\"")))
+          (gather_table (apply_aggregate (group_rows table indexs) agg_params )))))))
 
 ;; Filter rows by uniqueness criteria
 (defn apply_distinct
@@ -416,11 +454,12 @@
 
   ;; Finds indexes of given columns
   (defn find_index [table_columns select_columns]
-    (if (empty? select_columns)
-      `()
-      (conj 
+    (cond 
+      (empty? select_columns) `()
+      (= (first select_columns) "*") (find_index table_columns (unite table_columns (rest select_columns)))
+      :else (conj 
         (find_index table_columns (rest select_columns)) 
-          (if (> (.indexOf table_columns  (first select_columns)) -1)
+          (if (> (.indexOf table_columns (first select_columns)) -1)
             (.indexOf table_columns (first select_columns))
             (throw (AssertionError. (str "Unknown column: \"" (first select_columns) "\"")))))))
 
@@ -431,7 +470,6 @@
       (conj (run_rows_filter row (rest column_list)) (nth row (first column_list)))))
 
   (vec (cond 
-    (= (first columns) "*") table
     (empty? table) table
     (empty? (find_index (first table) columns)) `()
     :else (let [column_list (vec (find_index (first table) columns))]
@@ -467,9 +505,9 @@
         "\n"
         (let [spaces_count (quot (- (first len) (count (first row))) 2)] 
           (str
-            (add_symbols (inc (if (= (mod (- (first len) (count (first row))) 2) 0) spaces_count (inc spaces_count))) " ")
+            (add_symbols (inc spaces_count) " ")
             (first row)
-            (add_symbols spaces_count " ")
+            (add_symbols (if (= (mod (- (first len) (count (first row))) 2) 0) spaces_count (inc spaces_count)) " ")
             " |"
             (format_row (rest row) (rest len)))))))
 
@@ -622,16 +660,27 @@
 
 ;; Getting aggregate function and column name from the query
 (defn get_aggregate [query]
-  (cond 
-    (str/includes? query "avg(") 
-      (hash-map 
-        :function "avg" 
-        :column_name (subs query (+ (.indexOf query "avg(") 4) (.indexOf query ")")))
-    (str/includes? query "max(")
-      (hash-map 
-        :function "max" 
-        :column_name (subs query (+ (.indexOf query "max(") 4) (.indexOf query ")")))
-        :else {}))
+  (defn find_funcs [el]
+    (cond 
+      (str/includes? el "avg(") 
+        (hash-map 
+          :function "avg" 
+          :column_name (subs el (+ (.indexOf el "avg(") 4) (.indexOf el ")")))
+      (str/includes? el "max(")
+        (hash-map 
+          :function "max" 
+          :column_name (subs el (+ (.indexOf el "max(") 4) (.indexOf el ")")))
+      (str/includes? el "min(")
+        (hash-map 
+          :function "min" 
+          :column_name (subs el (+ (.indexOf el "min(") 4) (.indexOf el ")")))
+      (str/includes? el "count(")
+        (hash-map
+          :function "count"
+          :column_name (subs el (+ (.indexOf el "count(") 6) (.indexOf el ")")))
+          :else nil))
+          
+  (vec (remove nil? (map find_funcs (get_columns query)))))
 
 ;;Creating a hash-map with query parameters
 (defn get_params [query]
@@ -652,24 +701,25 @@
   (println 
     (str/join 
       (format_table
-        (if (empty? (params :aggregate))
           (apply_order
-            (apply_filter 
-              (apply_where 
-                (apply_distinct
-                  (apply_join (parse_table (params :table_name)) (params :join))
-                 (params :distinct)) 
-              (params :where)) 
+            (apply_filter
+              (apply_group
+                (apply_where 
+                  (apply_distinct
+                    (apply_join (parse_table (params :table_name)) (params :join))
+                  (params :distinct)) 
+                (params :where))
+              (params :group_by) (params :aggregate))
             (params :columns))
-          (params :order_by))
-          (apply_aggregate (parse_table (params :table_name)) (params :aggregate)))))))
+          (params :order_by))))))
 
 ;; CLI
 (defn cli [] 
   (let [input (read-line)]
-    (select input))
-    (recur))
+    (select input)
+    (recur)))
 
 (defn -main []
   (cli))
+  ;;(print (apply_group [["id" "name" "country"] ["1" "Alexa" "USA"] ["2" "Bryan" "France"] ["3" "Ford" "Marocco"] ["4" "Ilya" "USA"] ["5" "Sylvia" "Marocco"] ["6" "Kent" "Marocco"]] ["country"] [{:function "max" :column_name "id"}] )))
 
