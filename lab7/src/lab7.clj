@@ -1,6 +1,7 @@
 (ns lab7
     (:use [flatland.ordered.map])
     (:require [clojure.string :as str])
+    (:require [clojure.edn :as edn])
     (:gen-class)
 )
 
@@ -376,9 +377,35 @@
         (throw (AssertionError. (str "Column " (first columns) " was not found")))))))
 
 ;; Creates inner tables on given criterias
-(defn apply_group [table names agg_params]
+(defn apply_group [table names agg_params having_params]
   (defn gen_key [cols]
    (subs (str/join "_" cols) 0 (count (str/join "_" cols))))
+
+  (defn apply_having [table]
+    (defn compare_group [val1 val2 op]
+      (cond 
+        (= op "<=") 
+          (try
+            (<= (double (edn/read-string val1)) (double (edn/read-string val2)))
+            (catch Error e (throw (AssertionError. "Can`t apply \"<=\" operation on string"))))
+        :else (not (= (str val1) (str val2)))))
+
+    (if (nil? having_params)
+      table
+      (let [value (having_params :value)
+           aggregate_table (apply_aggregate table [(having_params :column)])]
+
+        (vec 
+          (conj 
+            (seq 
+              (remove nil? 
+                (map 
+                  (fn [subtable]
+                    (if (compare_group (nth (first subtable) (dec (count (first subtable)))) value (having_params :operation))
+                      (vec (conj (seq (rest subtable)) (subvec (first subtable) 0 (count (first subtable)))))
+                      nil))
+                  (rest aggregate_table)))) 
+            (first table))))))
 
   (defn group_rows
     ([table indexs] (vec (conj (seq (group_rows (rest table) indexs (ordered-map))) [(first table)])))
@@ -400,7 +427,7 @@
       (let [indexs (map (fn [name] (if (> (.indexOf (first table) name) -1) (.indexOf (first table) name) nil)) names)]
         (if (> (.indexOf indexs nil) -1) 
           (throw (AssertionError. (str "Unfound column name \"" (nth names (.indexOf indexs nil)) "\"")))
-          (gather_table (apply_aggregate (group_rows table indexs) agg_params )))))))
+          (gather_table (apply_aggregate (apply_having (group_rows table indexs)) agg_params )))))))
 
 ;; Filter rows by uniqueness criteria
 (defn apply_distinct
@@ -450,13 +477,13 @@
     (run_conditions (map (fn [el] (if (map? el) (filter_condition el) el)) conditions))))
 
 ;; Filtring the columns in the result table
-(defn apply_filter [table columns]
+(defn apply_filter [table columns initial_columns]
 
   ;; Finds indexes of given columns
   (defn find_index [table_columns select_columns]
     (cond 
       (empty? select_columns) `()
-      (= (first select_columns) "*") (find_index table_columns (unite table_columns (rest select_columns)))
+      (= (first select_columns) "*") (find_index table_columns (append initial_columns (rest select_columns)))
       :else (conj 
         (find_index table_columns (rest select_columns)) 
           (if (> (.indexOf table_columns (first select_columns)) -1)
@@ -474,6 +501,32 @@
     (empty? (find_index (first table) columns)) `()
     :else (let [column_list (vec (find_index (first table) columns))]
       (map (fn [row] (vec (run_rows_filter row column_list))) table)))))
+
+(defn apply_case [table params]
+  (defn compare_case [conditions row header]
+    (cond
+      (empty? conditions) "null"
+      (= ((first conditions) :condition) true) ((first conditions) :text)
+      :else (let [operation (((first conditions) :condition) :operation)
+          value (Integer/parseInt (((first conditions) :condition) :value))
+          column_index (.indexOf header (((first conditions) :condition) :column_name))
+          text ((first conditions) :text)]
+      (if (< column_index 0)
+        (throw (AssertionError. (str "Unknown column" (((first conditions) :condition) :column_name) "in the case expression")))
+        (if 
+          (cond 
+            (= operation "=") (= (Integer/parseInt (nth row column_index)) value)
+            (= operation ">=") (>= (Integer/parseInt (nth row column_index)) value)
+            (= operation "<=") (<= (Integer/parseInt (nth row column_index)) value)
+            (= operation "<>") (not (= (Integer/parseInt (nth row column_index)) value))
+            :else (throw (AssertionError. (str "Unsupportable operation " operation))))
+          text
+          (recur (rest conditions) row header))))))
+
+  (if (nil? params)
+    table
+    (let [params_vec (params :params) column_name (params :column_name)]
+      (vec (conj (seq (map (fn [row] (conj row (compare_case params_vec row (first table)))) (rest table))) (conj (first table) column_name))))))
 
 ;; Formatting the result table for printing
 (defn format_table [table] 
@@ -545,6 +598,54 @@
       {})
     )
 
+;; Getting aggregate function and column name from the query
+(defn get_aggregate [columns]
+  (defn find_funcs [el]
+    (cond 
+      (str/includes? el "avg(") 
+        (hash-map 
+          :function "avg" 
+          :column_name (subs el (+ (.indexOf el "avg(") 4) (.indexOf el ")")))
+      (str/includes? el "max(")
+        (hash-map 
+          :function "max" 
+          :column_name (subs el (+ (.indexOf el "max(") 4) (.indexOf el ")")))
+      (str/includes? el "min(")
+        (hash-map 
+          :function "min" 
+          :column_name (subs el (+ (.indexOf el "min(") 4) (.indexOf el ")")))
+      (str/includes? el "count(")
+        (hash-map
+          :function "count"
+          :column_name (subs el (+ (.indexOf el "count(") 6) (.indexOf el ")")))
+      :else nil))
+          
+  (vec (remove nil? (map find_funcs columns))))
+
+;; Getting having condition
+(defn get_having [query]
+  ;; Creates a hash-map with parameters
+  (defn create_map [condition]
+    (hash-map
+      :column (if (str/includes? condition "<=") 
+                (first (get_aggregate[ (str/trim (subs condition 0 (.indexOf condition "<=")))]))
+                (first (get_aggregate [(str/trim (subs condition 0 (.indexOf condition "<>")))])))
+      :operation (if (str/includes? condition "<=") "<=" "<>") 
+      :value (if (str/includes? condition "<=")
+                (str/trim (subs condition (+ (.indexOf condition "<=") 2) (count condition)))
+                (str/trim (subs condition (+ (.indexOf condition "<>") 2) (count condition))))))
+  (cond 
+    (not (str/includes? query " having ")) nil
+    (not (str/includes? query " group by ")) (throw (AssertionError. "Having can`t be applied without \"group by\" clause"))
+    :else (create_map 
+                                      (str/trim 
+                                        (subs 
+                                          query 
+                                          (+ (.indexOf query " having ") 8)
+                                          (cond 
+                                            (str/includes? query " order by ") (.indexOf query " order by ")
+                                            :else (.indexOf query ";")))))))
+
 ;; Getting "group by" columns
 (defn get_group_by [query]
   (if (str/includes? query " group by ")
@@ -554,7 +655,8 @@
         (subs 
           query 
           (+ (.indexOf query " group by ") 10) 
-          (cond 
+          (cond
+            (str/includes? query " having ") (.indexOf query " having ")
             (str/includes? query " order by ") (.indexOf query " order by ")
             :else (.indexOf query ";"))) #",")))
     nil))
@@ -589,8 +691,7 @@
 
 ;; Getting "where" conditions
 (defn get_where [query]
-  ;
-  ; Creates a hash-map with parameters
+  ;; Creates a hash-map with parameters
   (defn create_map [condition]
     (hash-map
       :column (if (str/includes? condition "<=") 
@@ -634,11 +735,23 @@
 (defn get_columns [query]
   (try
     (def column_string 
-      (if (get_distinct query) 
-        (str/trim (subs query (+ (.indexOf query "distinct") 9) (.indexOf query "from")))
-        (str/trim (subs query (+ (.indexOf query "select") 7) (.indexOf query "from")))))
+        (str (str/trim 
+          (subs 
+            query 
+            (cond 
+              (get_distinct query) (+ (.indexOf query "distinct") 9) 
+              :else (+ (.indexOf query "select") 7))
+
+            (cond 
+              (str/includes? query " case ") (.indexOf query " case ")
+              :else (.indexOf query "from"))))
+            (cond
+              (not (str/includes? query " case ")) ""
+              (not (str/includes? query " as ")) (throw (AssertionError. "\"as\" should be present in the \"case\" expression"))
+              :else (str/trim (subs query (+ (.indexOf query " as ") 4) (.indexOf query " from "))))))
+
   
-    (vec (map (fn [s] (str/trim s)) (str/split column_string #",")))
+    (vec (remove empty? (map (fn [s] (str/trim s)) (str/split column_string #","))))
   (catch Exception e (throw (AssertionError. "Invalid columns input")))))
 
 ;; Getting table name from the query
@@ -658,29 +771,42 @@
           :else (.indexOf query ";"))))
     (catch Exception e (throw (AssertionError. "Invalid input")))))
 
-;; Getting aggregate function and column name from the query
-(defn get_aggregate [query]
-  (defn find_funcs [el]
-    (cond 
-      (str/includes? el "avg(") 
-        (hash-map 
-          :function "avg" 
-          :column_name (subs el (+ (.indexOf el "avg(") 4) (.indexOf el ")")))
-      (str/includes? el "max(")
-        (hash-map 
-          :function "max" 
-          :column_name (subs el (+ (.indexOf el "max(") 4) (.indexOf el ")")))
-      (str/includes? el "min(")
-        (hash-map 
-          :function "min" 
-          :column_name (subs el (+ (.indexOf el "min(") 4) (.indexOf el ")")))
-      (str/includes? el "count(")
-        (hash-map
-          :function "count"
-          :column_name (subs el (+ (.indexOf el "count(") 6) (.indexOf el ")")))
-          :else nil))
-          
-  (vec (remove nil? (map find_funcs (get_columns query)))))
+;; Getting "case" parameters
+(defn get_case [query]
+  (defn create_case_map 
+    ([value] (hash-map :condition true :text value))
+    ([condition value]
+      (let [
+        operation
+        (cond 
+          (str/includes? condition ">=") ">="
+          (str/includes? condition "<=") "<="
+          (str/includes? condition "<>") "<>"
+          (str/includes? condition "=") "="
+          :else (throw (AssertionError. "Unknown case comparison operation")))]
+          (hash-map 
+            :condition 
+              (hash-map 
+                :column_name (str/trim (subs condition 0 (.indexOf condition operation)))
+                :operation operation
+                :value (str/trim (subs condition (+ (.indexOf condition operation) (if (= operation "=") 1 2)))))
+            :text value))))
+
+  (defn parse_params [string]
+    (println string)
+    (cond
+      (str/includes? string "else") 
+        (let [condition_string (str/trim (subs string (.indexOf string "else") (.indexOf string "end")))]
+          (conj (parse_params (str/trim (subs string 0 (.lastIndexOf string "else")))) (create_case_map (str/trim (subs condition_string (+ (.indexOf condition_string "else") 4))))))
+      (str/includes? string "when") 
+        (let [condition_string (str/trim (subs string (.lastIndexOf string  "when")))] 
+          (conj (parse_params (str/trim (subs string 0 (.lastIndexOf string "when")))) (create_case_map (str/trim (subs condition_string (+ (.indexOf condition_string "when") 4) (.indexOf condition_string "then"))) (str/trim (subs condition_string (+ (.indexOf condition_string "then") 4))))))
+      :else []))
+
+  (if (str/includes? query " case ")
+    (let [case_string (str/trim (subs query (+ (.indexOf query " case ") 5) (.indexOf query " from ")))]
+      (hash-map :params (parse_params case_string) :column_name (str/trim (subs case_string (+ (.indexOf case_string " as ") 4) (count case_string)))))
+    nil))
 
 ;;Creating a hash-map with query parameters
 (defn get_params [query]
@@ -691,35 +817,40 @@
     :where (get_where query),
     :order_by (get_order_by query)
     :group_by (get_group_by query)
-    :aggregate (get_aggregate query)
-    :join (get_join query)))
+    :aggregate (get_aggregate (get_columns query))
+    :having (get_having query)
+    :join (get_join query)
+    :case (get_case query)))
 
 ;; Main function
 (defn select [query]
   (def params (get_params query))
 
-  (println 
-    (str/join 
-      (format_table
+  ;;(print (get_case query)))
+  ;;(println params))
+  (let [table (apply_join (parse_table (params :table_name)) (params :join))]
+    (println 
+      (str/join 
+        (format_table
           (apply_order
             (apply_filter
+              (apply_case
               (apply_group
                 (apply_where 
-                  (apply_distinct
-                    (apply_join (parse_table (params :table_name)) (params :join))
-                  (params :distinct)) 
+                  (apply_distinct table (params :distinct)) 
                 (params :where))
-              (params :group_by) (params :aggregate))
-            (params :columns))
-          (params :order_by))))))
+              (params :group_by) (params :aggregate) (params :having))
+              (params :case))
+            (params :columns) (first table))
+          (params :order_by)))))))
 
 ;; CLI
 (defn cli [] 
   (let [input (read-line)]
-    (select input)
-    (recur)))
+    (select input))
+    (recur))
 
 (defn -main []
   (cli))
-  ;;(print (apply_group [["id" "name" "country"] ["1" "Alexa" "USA"] ["2" "Bryan" "France"] ["3" "Ford" "Marocco"] ["4" "Ilya" "USA"] ["5" "Sylvia" "Marocco"] ["6" "Kent" "Marocco"]] ["country"] [{:function "max" :column_name "id"}] )))
+  ;;(print (apply_case [["id" "name" "country"] ["1" "Alexa" "USA"] ["2" "Bryan" "France"] ["3" "Ford" "Marocco"] ["4" "Ilya" "USA"] ["5" "Sylvia" "Marocco"] ["6" "Kent" "Marocco"]] (get_case "select *, id, case when id <= 2 then Hello when id = 3 then Lol else Bye end as title from table;") )))
 
