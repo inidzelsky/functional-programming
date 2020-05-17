@@ -317,7 +317,6 @@
     (defn connect_header [vals]
       (conj vals [(conj (first (first table)) (str (param :function) "(" (param :column_name) ")"))]))
 
-
       (vec (connect_header (map_table))))
 
   (if (empty? params)
@@ -332,8 +331,7 @@
             (= (param :function) "min") (apply_fun table param agg_min column_index)
             :else (throw (AssertionError. (str "Unknown function " (param :function))))) 
           (rest params))
-        (throw (AssertionError. (str "Unknown column name " (param :column_name)))))
-  )))
+        (throw (AssertionError. (str "Unknown column name " (param :column_name))))))))
 
 ;; Sorts the result table
 (defn apply_order 
@@ -430,7 +428,6 @@
   (defn gather_table [table]
     (vec (map (fn [subtable] (first subtable)) table)))
 
-  (print names)
   (if (nil? names)
     table
     (if (empty? names) 
@@ -735,26 +732,25 @@
 
 ;; Getting column names from the query
 (defn get_columns [query]
-  (try
+  ;(try
     (def column_string 
         (str (str/trim 
-          (subs 
+          (str/trim (subs 
             query 
             (cond 
-              (get_distinct query) (+ (.indexOf query "distinct") 9) 
-              :else (+ (.indexOf query "select") 7))
-
+              (get_distinct query) (+ (.indexOf query "distinct") 8) 
+              :else (+ (.indexOf query "select") 6))
             (cond 
               (str/includes? query " case ") (.indexOf query " case ")
-              :else (.indexOf query "from"))))
+              :else (.indexOf query "from")))))
             (cond
               (not (str/includes? query " case ")) ""
               (not (str/includes? query " as ")) (throw (AssertionError. "\"as\" should be present in the \"case\" expression"))
               :else (str/trim (subs query (+ (.indexOf query " as ") 4) (.indexOf query " from "))))))
 
   
-    (vec (remove empty? (map (fn [s] (str/trim s)) (str/split column_string #","))))
-  (catch Exception e (throw (AssertionError. "Invalid columns input")))))
+    (vec (remove empty? (map (fn [s] (str/trim s)) (str/split column_string #",")))))
+  ;(catch Exception e (throw (AssertionError. "Invalid columns input")))))
 
 ;; Getting table name from the query
 (defn get_table [query]
@@ -795,7 +791,6 @@
             :text value))))
 
   (defn parse_params [string]
-    (println string)
     (cond
       (str/includes? string "else") 
         (let [condition_string (str/trim (subs string (.indexOf string "else") (.indexOf string "end")))]
@@ -807,7 +802,7 @@
 
   (if (str/includes? query " case ")
     (let [case_string (str/trim (subs query (+ (.indexOf query " case ") 5) (.indexOf query " from ")))]
-      (hash-map :params (parse_params case_string) :column_name (str/trim (subs case_string (+ (.indexOf case_string " as ") 4) (count case_string)))))
+      (hash-map :params (parse_params case_string) :column_name (str/trim (subs case_string (+ (.indexOf case_string " as ") 4) (if (str/includes? case_string ",") (.indexOf case_string ",") (count case_string))))))
     nil))
 
 ;;Creating a hash-map with query parameters
@@ -828,21 +823,17 @@
 (defn select [query]
   (def params (get_params query))
 
-  ;;(print (get_case query)))
-  ;;(println params))
   (let [table (apply_join (parse_table (params :table_name)) (params :join))]
     (println 
       (str/join 
         (format_table
           (apply_order
             (apply_filter
-              (apply_case
               (apply_group
                 (apply_where 
-                  (apply_distinct table (params :distinct)) 
+                  (apply_distinct (apply_case table (params :case)) (params :distinct)) 
                 (params :where))
               (params :group_by) (params :aggregate) (params :having))
-              (params :case))
             (params :columns) (first table))
           (params :order_by)))))))
 
@@ -854,5 +845,4 @@
 
 (defn -main []
   (cli))
-  ;;(print (apply_case [["id" "name" "country"] ["1" "Alexa" "USA"] ["2" "Bryan" "France"] ["3" "Ford" "Marocco"] ["4" "Ilya" "USA"] ["5" "Sylvia" "Marocco"] ["6" "Kent" "Marocco"]] (get_case "select *, id, case when id <= 2 then Hello when id = 3 then Lol else Bye end as title from table;") )))
 
