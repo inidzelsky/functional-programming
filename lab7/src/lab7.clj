@@ -165,6 +165,16 @@
       (read_file table_name ["register"]) (read_tsv (str table_name ".tsv"))
       :else (throw (AssertionError. (str "Couldn`t find a table with the name: \"" table_name "\"")))))))
 
+;; Filter rows by uniqueness criteria
+(defn apply_distinct
+  ([table distinct] (if distinct (apply_distinct table [] []) table))
+  ([table hash result] 
+    (if (empty? table) 
+      (vec result)
+      (if (> (.indexOf hash (first (first table))) -1)
+        (recur (rest table) hash result)
+        (recur (rest table) (conj hash (first (first table))) (conj result (first table)))))))
+
 ;; Concates 2 tables horizontally on the same column value
 (defn apply_join [table1 params]
   (if-not (empty? params)
@@ -420,24 +430,15 @@
   (defn gather_table [table]
     (vec (map (fn [subtable] (first subtable)) table)))
 
+  (print names)
   (if (nil? names)
     table
     (if (empty? names) 
-      (throw (AssertionError. "Should be at least one column in the \"group by\" clause"))
+      (apply_order (apply_distinct table true) (hash-map :columns [(first (first table))] :direction "asc"))
       (let [indexs (map (fn [name] (if (> (.indexOf (first table) name) -1) (.indexOf (first table) name) nil)) names)]
         (if (> (.indexOf indexs nil) -1) 
           (throw (AssertionError. (str "Unfound column name \"" (nth names (.indexOf indexs nil)) "\"")))
           (gather_table (apply_aggregate (apply_having (group_rows table indexs)) agg_params )))))))
-
-;; Filter rows by uniqueness criteria
-(defn apply_distinct
-  ([table distinct] (if distinct (apply_distinct table [] []) table))
-  ([table hash result] 
-    (if (empty? table) 
-      (vec result)
-      (if (> (.indexOf hash (first (first table))) -1)
-        (recur (rest table) hash result)
-        (recur (rest table) (conj hash (first (first table))) (conj result (first table)))))))
 
 ;; Filter rows by given conditions
 (defn apply_where [table conditions]
@@ -502,6 +503,7 @@
     :else (let [column_list (vec (find_index (first table) columns))]
       (map (fn [row] (vec (run_rows_filter row column_list))) table)))))
 
+;; Adds a new column on "case" parameters
 (defn apply_case [table params]
   (defn compare_case [conditions row header]
     (cond
@@ -648,17 +650,17 @@
 
 ;; Getting "group by" columns
 (defn get_group_by [query]
-  (if (str/includes? query " group by ")
-    (vec (map 
+  (if (str/includes? query " group by")
+    (vec (remove empty? (map 
       (fn [col] (str/trim col))
       (str/split 
         (subs 
           query 
-          (+ (.indexOf query " group by ") 10) 
+          (+ (.indexOf query " group by") 9) 
           (cond
             (str/includes? query " having ") (.indexOf query " having ")
             (str/includes? query " order by ") (.indexOf query " order by ")
-            :else (.indexOf query ";"))) #",")))
+            :else (.indexOf query ";"))) #","))))
     nil))
 
 ;; Getting "order by" parameter
@@ -766,7 +768,7 @@
           (str/includes? query " full outer join ") (.indexOf query " full outer join ")
           (str/includes? query " right join ") (.indexOf query " right join ")
           (str/includes? query " where ") (.indexOf query "where")
-          (str/includes? query " group by ") (.indexOf query " group by ")
+          (str/includes? query " group by") (.indexOf query " group by")
           (str/includes? query " order by ") (.indexOf query " order by ")
           :else (.indexOf query ";"))))
     (catch Exception e (throw (AssertionError. "Invalid input")))))
